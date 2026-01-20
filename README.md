@@ -1,6 +1,6 @@
 # Skunkworks
 
-In a perfect world I'd spend 0% of my time on tooling, developer environments or any of that shit, but these are exciting times where the frontier is moving every day and it's often some random on twitter with the greatest idea. Lots of noise, but plenty of signal too.
+In a perfect world I'd spend 0% of my time on tooling, developer environments or any of that shit, but these are exciting times where the frontier is moving every day and it's often some random on twitter with the latest, greatest idea. Lots of noise, but plenty of signal too.
 
 This project is the culmination of finally getting Claude Code and not wanting to get so far behind the curve as to be unable to catch up.
 I like or bookmark CC or agentic coding ideas. Then have Claude scrape them once in awhile, see if there's any category of feature I want to add to this, do so, then move on. It's not 0% of my time, but it's simple enough.
