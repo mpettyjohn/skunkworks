@@ -240,6 +240,20 @@ node dist/index.js --help
 npx tsc --noEmit
 ```
 
+## Inspired By
+
+Skunkworks stands on the shoulders of these ideas and projects:
+
+- **[GSD (Get Shit Done)](https://github.com/glittercowboy/get-shit-done)** by glittercowboy — The context compression and "fresh subagent contexts" approach. GSD's insight: "Context stays fresh. Quality stays high."
+
+- **[LLM Council](https://github.com/karpathy/llm-council)** by [Andrej Karpathy](https://x.com/karpathy/status/1992381094667411768) — The multi-model "council" review concept. Same model = same blind spots. Having models critique each other catches errors a single model would miss.
+
+- **[Ramp's Inspect Agent](https://builders.ramp.com/post/why-we-built-our-background-agent)** — Visual verification with screenshots. For frontend work, Inspect "visually verifies its work and gives users screenshots and live previews." [Eric Glyman's thread](https://x.com/eglyman/status/2010776124037743088) on why feedback loops matter.
+
+- **[Thariq Shihipar](https://x.com/trq212/status/2005315275026260309)** — The spec-based development pattern using AskUserQuestion. "Start with a minimal spec and ask Claude to interview you... then make a new session to execute the spec."
+
+- **[Compound AI Systems](https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)** (Berkeley AI Research) — The philosophy that combining multiple AI components beats any single model.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
