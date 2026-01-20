@@ -246,7 +246,7 @@ Skunkworks stands on the shoulders of these ideas and projects:
 
 - **[GSD (Get Shit Done)](https://github.com/glittercowboy/get-shit-done)** by glittercowboy — The context compression and "fresh subagent contexts" approach. GSD's insight: "Context stays fresh. Quality stays high."
 
-- **[LLM Council](https://github.com/karpathy/llm-council)** by [Andrej Karpathy](https://x.com/karpathy/status/1992381094667411768) — The multi-model "council" review concept. Same model = same blind spots. Having models critique each other catches errors a single model would miss.
+- **Multi-model "Council" review** — [@tenobrus](https://x.com/tenobrus/status/2010428123310129487) on why same model = same blind spots, and [Andrej Karpathy's LLM Council](https://github.com/karpathy/llm-council) for the implementation. Having models critique each other catches errors a single model would miss.
 
 - **[Ramp's Inspect Agent](https://builders.ramp.com/post/why-we-built-our-background-agent)** — Visual verification with screenshots. For frontend work, Inspect "visually verifies its work and gives users screenshots and live previews." [Eric Glyman's thread](https://x.com/eglyman/status/2010776124037743088) on why feedback loops matter.
 
