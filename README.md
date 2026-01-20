@@ -252,7 +252,7 @@ Skunkworks stands on the shoulders of these ideas and projects:
 
 - **[Thariq Shihipar](https://x.com/trq212/status/2005315275026260309)** — The spec-based development pattern using AskUserQuestion. "Start with a minimal spec and ask Claude to interview you... then make a new session to execute the spec."
 
-- **[Compound AI Systems](https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/)** (Berkeley AI Research) — The philosophy that combining multiple AI components beats any single model.
+- **Compounding Engineering** — [Kieran Klaassen](https://x.com/kieranklaassen/status/1976399877098831997) on cross-project learning, via [Flavio Copes](https://x.com/flaviocopes/status/2013281081735118889) who put it on our radar.
 
 ## License
 
