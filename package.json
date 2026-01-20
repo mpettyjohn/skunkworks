@@ -1,0 +1,43 @@
+{
+  "name": "skunkworks",
+  "version": "2.0.0",
+  "description": "Skunkworks - Multi-model agentic software development tool - GPT-5.2-Codex (Architect), Opus 4.5 (Builder), Gemini 3 Flash (Reviewer)",
+  "main": "dist/index.js",
+  "bin": {
+    "skunk": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "openai",
+    "gemini",
+    "codex",
+    "coding",
+    "development",
+    "multi-model"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "glob": "^13.0.0",
+    "ora": "^8.1.1",
+    "playwright": "^1.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
