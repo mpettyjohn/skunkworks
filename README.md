@@ -49,7 +49,7 @@ npm install -g @google/gemini-cli
 
 ```bash
 # Clone the repo
-git clone https://github.com/mathcoteacher/skunkworks.git
+git clone https://github.com/mpettyjohn/skunkworks.git
 cd skunkworks
 
 # Install dependencies
