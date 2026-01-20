@@ -182,6 +182,29 @@ Every build gets checked by [/rams](https://www.rams.ai/) for:
 
 No more "AI slop" with random colors and inaccessible markup.
 
+### Mission Control Dashboard
+
+Track all your Skunkworks projects in one place:
+
+```bash
+# CLI dashboard - quick status overview
+skunk dashboard
+
+# Web dashboard - opens in browser
+skunk dashboard --web
+
+# Find existing projects
+skunk dashboard --scan ~/Projects
+```
+
+Shows status for each project:
+- **BLOCKED** - Waiting for your answer
+- **NEEDS YOU** - Ready for input
+- **RUNNING** - Building in progress
+- **COMPLETE** - Done
+
+The web dashboard auto-refreshes and lets you view project artifacts (SPEC.md, ARCHITECTURE.md, REVIEW.md).
+
 ### GitHub Integration
 
 Track progress visually with GitHub Projects:
@@ -197,6 +220,9 @@ skunk github init
 | `skunk new "idea"` | Start a new project |
 | `skunk continue` | Resume from where you left off |
 | `skunk status` | Show project progress |
+| `skunk dashboard` | View all projects (CLI) |
+| `skunk dashboard --web` | Open web dashboard in browser |
+| `skunk dashboard --scan [path]` | Discover projects in directory |
 | `skunk interview` | Run just the interview phase |
 | `skunk architect` | Run just the architect phase |
 | `skunk build` | Run just the builder phase |
@@ -228,7 +254,9 @@ your-project/
 └── ... your code ...
 ```
 
-Global learnings stored in `~/.skunkworks/learning/`.
+Global data stored in `~/.skunkworks/`:
+- `projects.json` - Registry of all your Skunkworks projects
+- `learning/` - Cross-project learnings
 
 ## FAQ
 
