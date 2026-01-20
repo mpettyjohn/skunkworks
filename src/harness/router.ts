@@ -76,7 +76,7 @@ export class ModelRouter {
   private checkCLIAvailable(command: string): Promise<boolean> {
     return new Promise((resolve) => {
       const which = process.platform === 'win32' ? 'where' : 'which';
-      const child = spawn(which, [command], { shell: true });
+      const child = spawn(which, [command]);
       child.on('close', (code) => resolve(code === 0));
       child.on('error', () => resolve(false));
     });

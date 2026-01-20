@@ -4,7 +4,7 @@
   "description": "Skunkworks - Multi-model agentic software development tool - GPT-5.2-Codex (Architect), Opus 4.5 (Builder), Gemini 3 Flash (Reviewer)",
   "main": "dist/index.js",
   "bin": {
-    "skunk": "./dist/index.js"
+    "skunkworks": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

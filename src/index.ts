@@ -48,8 +48,25 @@ import {
 
 const program = new Command();
 
+// ASCII art banner - SR-71 Blackbird silhouette
+const BANNER = `
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+     _______________                ____================================____
+    /              /|__============/   /________________________________\\
+   /_______________|                  ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+  ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+   ███████╗██╗  ██╗██╗   ██╗███╗   ██╗██╗  ██╗██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗███████╗
+   ██╔════╝██║ ██╔╝██║   ██║████╗  ██║██║ ██╔╝██║    ██║██╔═══██╗██╔══██╗██║ ██╔╝██╔════╝
+   ███████╗█████╔╝ ██║   ██║██╔██╗ ██║█████╔╝ ██║ █╗ ██║██║   ██║██████╔╝█████╔╝ ███████╗
+   ╚════██║██╔═██╗ ██║   ██║██║╚██╗██║██╔═██╗ ██║███╗██║██║   ██║██╔══██╗██╔═██╗ ╚════██║
+   ███████║██║  ██╗╚██████╔╝██║ ╚████║██║  ██╗╚███╔███╔╝╚██████╔╝██║  ██║██║  ██╗███████║
+   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝ ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝
+`;
+
 program
-  .name('skunk')
+  .name('skunkworks')
   .description('Skunkworks: Multi-model agentic dev tool')
   .version('2.0.0');
 
@@ -63,12 +80,8 @@ program
   .action(async (description: string | undefined, options: { path: string }) => {
     const projectPath = path.resolve(options.path);
 
-    console.log(chalk.blue.bold('\n🚀 Skunkworks v2.0\n'));
-    console.log(chalk.gray('Multi-model orchestration (subscription-based, no API keys):\n'));
-    console.log(chalk.magenta('  Interview  → Claude Opus 4.5 (interactive AskUserQuestion)'));
-    console.log(chalk.cyan('  Architect  → GPT-5.2-Codex Extra High reasoning'));
-    console.log(chalk.green('  Builder    → Claude Opus 4.5'));
-    console.log(chalk.yellow('  Reviewer   → Gemini 3 Flash\n'));
+    console.log(chalk.green(BANNER));
+    console.log(chalk.gray('  Multi-model orchestration (subscription-based, no API keys)\n'));
 
     if (!description) {
       console.log(chalk.white('What do you want to build?'));
@@ -954,25 +967,105 @@ program
     console.log(chalk.gray('  Filter by category: skunklearnings -c react\n'));
   });
 
-// Parse arguments
-program.parse();
+// Interactive mode if no command provided
+async function runInteractiveMode() {
+  console.log(chalk.green(BANNER));
+  console.log(chalk.gray('  Multi-model AI orchestration for software development'));
+  console.log(chalk.gray('  Uses subscriptions (no API keys needed)\n'));
 
-// Show help if no command provided
-if (!process.argv.slice(2).length) {
-  console.log(chalk.blue.bold('\n🚀 Skunkworks v2.0\n'));
-  console.log(chalk.gray('Multi-model AI orchestration for software development'));
-  console.log(chalk.gray('Uses subscriptions (no API keys needed)\n'));
+  console.log(chalk.white.bold('  Pipeline:'));
+  console.log(chalk.magenta('    Interview  →') + chalk.cyan('  Architect  →') + chalk.green('  Builder  →') + chalk.yellow('  Reviewer\n'));
 
-  console.log(chalk.white.bold('4-Phase Pipeline:'));
-  console.log(chalk.magenta('  Interview:  Claude Opus 4.5 (interactive AskUserQuestion)'));
-  console.log(chalk.cyan('  Architect:  GPT-5.2-Codex Extra High reasoning'));
-  console.log(chalk.green('  Builder:    Claude Opus 4.5 (80.9% SWE-bench)'));
-  console.log(chalk.yellow('  Reviewer:   Gemini 3 Flash (78% SWE-bench)\n'));
+  console.log(chalk.white('  What do you want to build?'));
+  console.log(chalk.gray('  Just describe it, or type "help" for options\n'));
 
-  console.log(chalk.white.bold('Quick Start:'));
-  console.log(chalk.gray('  skunksetup             # Install CLI tools'));
-  console.log(chalk.gray('  skunkmodels            # Check tool status'));
-  console.log(chalk.gray('  skunknew "my project"  # Start building\n'));
+  const readline = await import('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-  program.outputHelp();
+  const projectPath = process.cwd();
+
+  const askForProject = () => {
+    rl.question(chalk.green('  > '), async (answer) => {
+      const trimmed = answer.trim();
+
+      if (!trimmed) {
+        askForProject();
+        return;
+      }
+
+      if (trimmed.toLowerCase() === 'quit' || trimmed.toLowerCase() === 'exit') {
+        console.log(chalk.gray('\n  Goodbye!\n'));
+        rl.close();
+        process.exit(0);
+      }
+
+      if (trimmed.toLowerCase() === 'help') {
+        console.log(chalk.white('\n  To start building, just describe your idea:\n'));
+        console.log(chalk.green('    > ') + chalk.white('a personal biographer that interviews me weekly and compiles my life story'));
+        console.log(chalk.green('    > ') + chalk.white('an app that watches me do physical therapy exercises and corrects my form'));
+        console.log(chalk.green('    > ') + chalk.white('a gift recommender that knows my family and suggests meaningful presents'));
+        console.log(chalk.green('    > ') + chalk.white('a tool that explains my medical test results in plain english'));
+        console.log(chalk.green('    > ') + chalk.white('a high-altitude strategic recon aircraft capable of mach 3.2 at 85,000 feet\n'));
+        console.log(chalk.gray('  Other commands:'));
+        console.log(chalk.gray('    continue  - Resume a project in progress'));
+        console.log(chalk.gray('    status    - Show current project status'));
+        console.log(chalk.gray('    models    - Check if AI tools are installed'));
+        console.log(chalk.gray('    setup     - Installation help'));
+        console.log(chalk.gray('    quit      - Exit\n'));
+        askForProject();
+        return;
+      }
+
+      if (trimmed.toLowerCase() === 'status') {
+        rl.close();
+        const orchestrator = new Orchestrator({ projectPath, verbose: false });
+        orchestrator.getStatus();
+        process.exit(0);
+      }
+
+      if (trimmed.toLowerCase() === 'models') {
+        rl.close();
+        process.argv = ['node', 'skunkworks', 'models'];
+        program.parse();
+        return;
+      }
+
+      if (trimmed.toLowerCase() === 'setup') {
+        rl.close();
+        process.argv = ['node', 'skunkworks', 'setup'];
+        program.parse();
+        return;
+      }
+
+      if (trimmed.toLowerCase() === 'continue') {
+        rl.close();
+        const orchestrator = new Orchestrator({ projectPath, verbose: true });
+        await orchestrator.continue();
+        return;
+      }
+
+      // Start building
+      rl.close();
+
+      const orchestrator = new Orchestrator({
+        projectPath,
+        verbose: true,
+      });
+
+      await orchestrator.startNew(trimmed);
+    });
+  };
+
+  askForProject();
+}
+
+// Check if running without arguments
+if (process.argv.length <= 2) {
+  runInteractiveMode();
+} else {
+  // Parse arguments for subcommands
+  program.parse();
 }
