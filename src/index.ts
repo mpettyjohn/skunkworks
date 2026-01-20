@@ -45,6 +45,16 @@ import {
   saveExtractedLearnings,
   formatExtractionResult,
 } from './harness/learning-extractor.js';
+import {
+  registerProject,
+  pruneStale,
+  scanForProjects,
+  getAllProjectStatuses,
+  renderDashboard,
+  renderScanResults,
+  renderPruneResults,
+} from './dashboard/index.js';
+import { startServer } from './dashboard/web/server.js';
 
 const program = new Command();
 
@@ -72,6 +82,9 @@ program
   .option('-p, --path <path>', 'Project path', process.cwd())
   .action(async (description: string | undefined, options: { path: string }) => {
     const projectPath = path.resolve(options.path);
+
+    // Register project in global registry
+    registerProject(projectPath);
 
     console.log(chalk.green(BANNER));
     console.log(chalk.gray('  Multi-model orchestration (subscription-based, no API keys)\n'));
@@ -330,6 +343,9 @@ program
       path.join(abrPath, 'state.json'),
       JSON.stringify(initialState, null, 2)
     );
+
+    // Register project in global registry
+    registerProject(projectPath, initialState.projectName);
 
     console.log(chalk.green('✓ Project initialized!'));
     console.log(chalk.gray(`  Created: ${abrPath}`));
@@ -958,6 +974,66 @@ program
     console.log(chalk.gray('  View a learning:    skunklearnings --stats'));
     console.log(chalk.gray('  Filter by type:     skunklearnings -t solution'));
     console.log(chalk.gray('  Filter by category: skunklearnings -c react\n'));
+  });
+
+/**
+ * Dashboard - View all projects across the filesystem
+ */
+program
+  .command('dashboard')
+  .description('View all Skunkworks projects in a dashboard')
+  .option('--web', 'Open web dashboard in browser')
+  .option('--scan [path]', 'Scan for projects (optionally specify path)')
+  .option('--prune', 'Remove stale projects from registry')
+  .action(async (options: { web?: boolean; scan?: boolean | string; prune?: boolean }) => {
+    // Handle prune
+    if (options.prune) {
+      const result = pruneStale();
+      console.log(renderPruneResults(result.removed.length, result.remaining.length));
+      return;
+    }
+
+    // Handle scan
+    if (options.scan !== undefined) {
+      console.log(chalk.cyan.bold('\nScanning for Skunkworks projects...\n'));
+
+      const scanPaths = typeof options.scan === 'string'
+        ? [path.resolve(options.scan)]
+        : [process.cwd()];
+
+      const result = scanForProjects(scanPaths);
+      console.log(renderScanResults(result.discovered.length, result.scanned, result.skipped));
+      return;
+    }
+
+    // Auto-prune stale entries before displaying
+    pruneStale();
+
+    // Handle web dashboard
+    if (options.web) {
+      console.log(chalk.cyan.bold('\nStarting web dashboard...\n'));
+
+      try {
+        const server = await startServer({ openBrowser: true });
+        console.log(chalk.green(`Dashboard running at ${server.url}`));
+        console.log(chalk.gray('Press Ctrl+C to stop\n'));
+
+        // Keep process running
+        process.on('SIGINT', async () => {
+          console.log(chalk.gray('\nShutting down...'));
+          await server.close();
+          process.exit(0);
+        });
+      } catch (error) {
+        console.log(chalk.red(`Failed to start web dashboard: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        process.exit(1);
+      }
+      return;
+    }
+
+    // CLI dashboard (default)
+    const projects = getAllProjectStatuses();
+    console.log(renderDashboard(projects));
   });
 
 // Interactive mode if no command provided

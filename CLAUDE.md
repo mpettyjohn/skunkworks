@@ -61,6 +61,11 @@ skunkarchitect             # Run just architect phase
 skunkbuild                 # Run just builder phase
 skunkreview                # Run just reviewer phase
 skunkcouncil [file]        # Multi-model plan review (standalone)
+skunkdashboard             # CLI view of all projects
+skunkdashboard --web       # Open web dashboard in browser
+skunkdashboard --scan      # Scan current dir for projects
+skunkdashboard --scan ~/Projects  # Scan specific path
+skunkdashboard --prune     # Remove stale projects from registry
 skunkgithub init           # Setup GitHub repo + project board
 skunkgithub status         # Check GitHub integration
 skunkgithub sync           # Push todos as GitHub issues
@@ -79,6 +84,17 @@ src/
 ├── index.ts                 # CLI entry point, all commands
 ├── config/
 │   └── models.ts            # Model configurations for each phase
+├── dashboard/
+│   ├── index.ts             # Dashboard module exports
+│   ├── registry.ts          # Global project registry (~/.skunkworks/projects.json)
+│   ├── scanner.ts           # Discover .skunkworks/ directories
+│   ├── status.ts            # Read project state, derive status
+│   ├── cli-renderer.ts      # CLI dashboard output (chalk)
+│   └── web/
+│       ├── server.ts        # Express server for web dashboard
+│       ├── api.ts           # REST endpoints for project data
+│       └── public/
+│           └── index.html   # Single-page web dashboard
 ├── harness/
 │   ├── orchestrator.ts      # Main pipeline logic
 │   ├── router.ts            # Routes to CLI tools (codex, claude, gemini)
@@ -430,6 +446,77 @@ When starting a new project:
 🎓 Found 2 relevant learnings from past projects:
   - Fix React controlled input warning (react)
   - API route structure pattern (nextjs)
+```
+
+### 3. Mission Control Dashboard
+
+Multi-project dashboard with two viewing modes: CLI and web.
+
+**The Problem:** When working on multiple projects, it's hard to track which ones need attention, which are blocked, and which are running.
+
+**The Solution:** A centralized dashboard that shows all Skunkworks projects across the filesystem.
+
+**Global Project Registry:**
+- Location: `~/.skunkworks/projects.json`
+- Auto-registers projects on `skunk new` and `skunk init`
+- Manual scan via `skunk dashboard --scan [path]`
+- Auto-prunes stale entries (missing `.skunkworks/state.json`)
+
+**Status Derivation:**
+```typescript
+type ProjectStatus = 'BLOCKED' | 'NEEDS_YOU' | 'RUNNING' | 'COMPLETE';
+
+// Derived from project state:
+// COMPLETE - currentPhase === 'complete'
+// BLOCKED - any todo has status === 'blocked'
+// RUNNING - any todo has status === 'in_progress'
+// NEEDS_YOU - ready for user input
+```
+
+**CLI Mode (`skunk dashboard`):**
+```
+SKUNKWORKS MISSION CONTROL
+
+  recipe-app              INTERVIEW    ! BLOCKED
+    Waiting for answer: "Should recipes be public or private?"
+
+  invoice-tracker         REVIEW       ? NEEDS YOU
+    Ready for your input
+
+  crm-prototype           BUILD        > RUNNING    [████████░░] 80%
+    Building: Contact list component
+
+  landing-page            COMPLETE     ✓ DONE
+    Shipped Jan 18
+
+Commands:
+  skunk continue --path <project>    Resume a project
+  skunk dashboard --web              Open web dashboard
+```
+
+**Web Mode (`skunk dashboard --web`):**
+- Express server on `http://localhost:3847`
+- Auto-opens browser
+- Polls for updates every 5 seconds
+- Click projects to expand and view artifacts (SPEC.md, ARCHITECTURE.md, REVIEW.md)
+- Shows command to continue each project
+
+**New Files:**
+- `src/dashboard/registry.ts` - Global project registry management
+- `src/dashboard/scanner.ts` - Filesystem scanner for .skunkworks directories
+- `src/dashboard/status.ts` - Status derivation logic
+- `src/dashboard/cli-renderer.ts` - CLI output with chalk
+- `src/dashboard/web/server.ts` - Express server
+- `src/dashboard/web/api.ts` - REST endpoints
+- `src/dashboard/web/public/index.html` - Single-page dashboard (vanilla JS)
+
+**Commands:**
+```bash
+skunk dashboard              # CLI view
+skunk dashboard --web        # Web dashboard
+skunk dashboard --scan       # Scan current directory
+skunk dashboard --scan ~/Projects  # Scan specific path
+skunk dashboard --prune      # Remove stale projects
 ```
 
 ---

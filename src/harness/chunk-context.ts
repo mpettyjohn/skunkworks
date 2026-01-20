@@ -6,7 +6,7 @@
  * to replay the entire conversation history.
  */
 
-import { ChunkPhase } from './state';
+import { ChunkPhase } from './state.js';
 
 export interface CompletedPhaseInfo {
   name: string;
@@ -61,7 +61,7 @@ ${designSpec}
 
   context += `
 ## Tasks for This Phase
-${phase.tasks.map(t => `- [ ] ${t}`).join('\n')}
+${phase.tasks.map((t: string) => `- [ ] ${t}`).join('\n')}
 `;
 
   return context;
@@ -135,7 +135,7 @@ ${designSpec}
 
   context += `
 ## Tasks for This Phase
-${phase.tasks.map(t => `- [ ] ${t}`).join('\n')}
+${phase.tasks.map((t: string) => `- [ ] ${t}`).join('\n')}
 
 ## Rules for This Phase
 1. Only implement the tasks listed above

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skunkworks Mission Control</title>
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --text-primary: #f0f6fc;
+      --text-secondary: #8b949e;
+      --text-muted: #6e7681;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --status-blocked: #f85149;
+      --status-needs-you: #d29922;
+      --status-running: #58a6ff;
+      --status-complete: #3fb950;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    header {
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .refresh-info {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .project-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .project-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .project-card:hover {
+      border-color: var(--accent);
+      box-shadow: var(--shadow);
+    }
+
+    .project-card.expanded {
+      border-color: var(--accent);
+    }
+
+    .project-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .project-name {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .project-phase {
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.25rem 0.625rem;
+      border-radius: 9999px;
+    }
+
+    .status-badge.blocked {
+      background: rgba(248, 81, 73, 0.15);
+      color: var(--status-blocked);
+    }
+
+    .status-badge.needs-you {
+      background: rgba(210, 153, 34, 0.15);
+      color: var(--status-needs-you);
+    }
+
+    .status-badge.running {
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--status-running);
+    }
+
+    .status-badge.complete {
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--status-complete);
+    }
+
+    .status-icon {
+      font-size: 0.625rem;
+    }
+
+    .project-detail {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      margin-top: 0.5rem;
+    }
+
+    .progress-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .progress-track {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-tertiary);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--status-running);
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      min-width: 2.5rem;
+      text-align: right;
+    }
+
+    .project-expanded {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      display: none;
+    }
+
+    .project-card.expanded .project-expanded {
+      display: block;
+    }
+
+    .artifact-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .artifact-tab {
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .artifact-tab:hover {
+      border-color: var(--accent);
+      color: var(--text-primary);
+    }
+
+    .artifact-tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--bg-primary);
+    }
+
+    .artifact-tab:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .artifact-content {
+      background: var(--bg-tertiary);
+      border-radius: var(--radius);
+      padding: 1rem;
+      max-height: 400px;
+      overflow-y: auto;
+      font-size: 0.875rem;
+      white-space: pre-wrap;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      color: var(--text-secondary);
+    }
+
+    .continue-cmd {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: var(--bg-tertiary);
+      border-radius: var(--radius);
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.875rem;
+    }
+
+    .continue-cmd label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .continue-cmd code {
+      color: var(--accent);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--text-secondary);
+    }
+
+    .empty-state h2 {
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+      color: var(--text-primary);
+    }
+
+    .empty-state p {
+      margin-bottom: 1.5rem;
+    }
+
+    .empty-state code {
+      display: block;
+      background: var(--bg-secondary);
+      padding: 1rem;
+      border-radius: var(--radius);
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      color: var(--accent);
+      margin-top: 0.5rem;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 4rem;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 1.5rem;
+      height: 1.5rem;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 1rem;
+      }
+
+      .project-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .artifact-tabs {
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>SKUNKWORKS MISSION CONTROL</h1>
+      <span class="refresh-info">Auto-refreshing every 5s</span>
+    </header>
+
+    <main id="app">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading projects...</p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const app = document.getElementById('app');
+    let expandedProjectId = null;
+    let currentArtifact = {};
+
+    const STATUS_CONFIG = {
+      BLOCKED: { class: 'blocked', icon: '!', label: 'Blocked' },
+      NEEDS_YOU: { class: 'needs-you', icon: '?', label: 'Needs You' },
+      RUNNING: { class: 'running', icon: '>', label: 'Running' },
+      COMPLETE: { class: 'complete', icon: '✓', label: 'Done' }
+    };
+
+    function formatDate(isoDate) {
+      if (!isoDate) return '';
+      const date = new Date(isoDate);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays < 7) return `${diffDays}d ago`;
+
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function truncate(text, maxLength) {
+      if (!text || text.length <= maxLength) return text || '';
+      return text.slice(0, maxLength - 3) + '...';
+    }
+
+    function renderProject(project) {
+      const status = STATUS_CONFIG[project.status];
+      const isExpanded = expandedProjectId === project.id;
+
+      let detailText = '';
+      if (project.status === 'BLOCKED' && project.blockingReason) {
+        detailText = `Waiting for answer: "${truncate(project.blockingReason, 60)}"`;
+      } else if (project.status === 'RUNNING' && project.currentTask) {
+        detailText = `Building: ${truncate(project.currentTask, 60)}`;
+      } else if (project.status === 'NEEDS_YOU') {
+        detailText = 'Ready for your input';
+      } else if (project.status === 'COMPLETE' && project.completedAt) {
+        detailText = `Shipped ${formatDate(project.completedAt)}`;
+      } else if (project.error) {
+        detailText = `Error: ${truncate(project.error, 60)}`;
+      }
+
+      const progressBar = project.status === 'RUNNING' ? `
+        <div class="progress-bar">
+          <div class="progress-track">
+            <div class="progress-fill" style="width: ${project.progressPercent}%"></div>
+          </div>
+          <span class="progress-text">${project.progressPercent}%</span>
+        </div>
+      ` : '';
+
+      const expandedSection = `
+        <div class="project-expanded">
+          <div class="artifact-tabs">
+            <button class="artifact-tab" data-artifact="spec" data-id="${project.id}">SPEC.md</button>
+            <button class="artifact-tab" data-artifact="architecture" data-id="${project.id}">ARCHITECTURE.md</button>
+            <button class="artifact-tab" data-artifact="review" data-id="${project.id}">REVIEW.md</button>
+          </div>
+          <div class="artifact-content" id="artifact-${project.id}">
+            Click a tab to view artifact content
+          </div>
+          <div class="continue-cmd">
+            <label>Continue this project:</label>
+            <code>skunk continue --path "${project.path}"</code>
+          </div>
+        </div>
+      `;
+
+      return `
+        <div class="project-card ${isExpanded ? 'expanded' : ''}" data-id="${project.id}">
+          <div class="project-header">
+            <div>
+              <div class="project-name">${project.name}</div>
+              <span class="project-phase">${project.phaseLabel}</span>
+            </div>
+            <span class="status-badge ${status.class}">
+              <span class="status-icon">${status.icon}</span>
+              ${status.label}
+            </span>
+          </div>
+          ${detailText ? `<div class="project-detail">${detailText}</div>` : ''}
+          ${progressBar}
+          ${expandedSection}
+        </div>
+      `;
+    }
+
+    function renderEmptyState() {
+      return `
+        <div class="empty-state">
+          <h2>No projects registered yet</h2>
+          <p>Get started by creating a new project or scanning for existing ones:</p>
+          <code>skunk new "your project idea"</code>
+          <code>skunk dashboard --scan</code>
+        </div>
+      `;
+    }
+
+    function render(projects) {
+      if (!projects || projects.length === 0) {
+        app.innerHTML = renderEmptyState();
+        return;
+      }
+
+      app.innerHTML = `<div class="project-grid">${projects.map(renderProject).join('')}</div>`;
+
+      // Add event listeners
+      document.querySelectorAll('.project-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.artifact-tab') || e.target.closest('.artifact-content') || e.target.closest('.continue-cmd')) {
+            return;
+          }
+          const id = card.dataset.id;
+          expandedProjectId = expandedProjectId === id ? null : id;
+          currentArtifact[id] = null;
+          render(projects);
+        });
+      });
+
+      document.querySelectorAll('.artifact-tab').forEach(tab => {
+        tab.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const artifact = tab.dataset.artifact;
+          const id = tab.dataset.id;
+
+          // Update active state
+          tab.parentElement.querySelectorAll('.artifact-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+
+          // Load content
+          const contentEl = document.getElementById(`artifact-${id}`);
+          contentEl.textContent = 'Loading...';
+
+          try {
+            const res = await fetch(`/api/projects/${id}/${artifact}`);
+            if (res.ok) {
+              const data = await res.json();
+              contentEl.textContent = data.content;
+            } else {
+              contentEl.textContent = 'Not found';
+            }
+          } catch (err) {
+            contentEl.textContent = 'Failed to load';
+          }
+        });
+      });
+    }
+
+    async function fetchProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const data = await res.json();
+        return data.projects;
+      } catch (err) {
+        console.error('Failed to fetch projects:', err);
+        return [];
+      }
+    }
+
+    async function init() {
+      const projects = await fetchProjects();
+      render(projects);
+
+      // Auto-refresh every 5 seconds
+      setInterval(async () => {
+        const projects = await fetchProjects();
+        render(projects);
+      }, 5000);
+    }
+
+    init();
+  </script>
+</body>
+</html>
