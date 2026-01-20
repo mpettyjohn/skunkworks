@@ -159,6 +159,16 @@ Long projects can degrade AI quality. Skunkworks compresses context intelligentl
 skunk context-health
 ```
 
+### Design & Accessibility Verification
+
+Every build gets checked by [/rams](https://www.rams.ai/) for:
+- WCAG 2.1 accessibility compliance
+- Visual design consistency
+- Missing component states
+- Contrast and spacing issues
+
+No more "AI slop" with random colors and inaccessible markup.
+
 ### GitHub Integration
 
 Track progress visually with GitHub Projects:
@@ -251,6 +261,8 @@ Skunkworks stands on the shoulders of these ideas and projects:
 - **[Ramp's Inspect Agent](https://builders.ramp.com/post/why-we-built-our-background-agent)** — Visual verification with screenshots. For frontend work, Inspect "visually verifies its work and gives users screenshots and live previews." [Eric Glyman's thread](https://x.com/eglyman/status/2010776124037743088) on why feedback loops matter.
 
 - **[Thariq Shihipar](https://x.com/trq212/status/2005315275026260309)** — The spec-based development pattern using AskUserQuestion. "Start with a minimal spec and ask Claude to interview you... then make a new session to execute the spec."
+
+- **[/rams](https://www.rams.ai/)** — Design and accessibility verification. Catches WCAG issues, visual inconsistencies, and missing component states.
 
 - **Compounding Engineering** — [Kieran Klaassen](https://x.com/kieranklaassen/status/1976399877098831997) on cross-project learning, via [Flavio Copes](https://x.com/flaviocopes/status/2013281081735118889) who put it on our radar.
 
