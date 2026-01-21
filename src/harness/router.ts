@@ -39,9 +39,28 @@ export interface CompletionResult {
   cli: CLITool;
 }
 
+export interface RateLimitStatus {
+  cli: CLITool;
+  callsThisHour: number;
+  lastCallTime: number;
+  isLimited: boolean;
+  resetTime?: number;
+}
+
 export class ModelRouter {
   private availableCLIs: Set<CLITool> = new Set();
   private initPromise: Promise<void> | null = null;
+
+  // Rate limit tracking
+  private callCounts: Map<CLITool, { count: number; windowStart: number }> = new Map();
+  private rateLimitedUntil: Map<CLITool, number> = new Map();
+
+  // Estimated limits per hour (conservative, actual may vary by subscription)
+  private static readonly RATE_LIMITS: Partial<Record<CLITool, number>> = {
+    'claude-code': 45,  // Claude Max has higher limits but varies
+    'codex': 50,        // ChatGPT Pro varies
+    'gemini': 60,       // Google typically generous
+  };
 
   constructor() {
     // Start detection immediately, store promise for later await
@@ -102,6 +121,110 @@ export class ModelRouter {
   }
 
   /**
+   * Track a call for rate limit purposes
+   */
+  private trackCall(cli: CLITool): void {
+    const now = Date.now();
+    const hourMs = 60 * 60 * 1000;
+    const current = this.callCounts.get(cli);
+
+    if (!current || now - current.windowStart > hourMs) {
+      // Start new window
+      this.callCounts.set(cli, { count: 1, windowStart: now });
+    } else {
+      // Increment in current window
+      this.callCounts.set(cli, { count: current.count + 1, windowStart: current.windowStart });
+    }
+  }
+
+  /**
+   * Check if we're approaching rate limits
+   * Returns true if we should warn/pause
+   */
+  private isApproachingLimit(cli: CLITool): boolean {
+    const limit = ModelRouter.RATE_LIMITS[cli];
+    if (!limit) return false;
+
+    const current = this.callCounts.get(cli);
+    if (!current) return false;
+
+    // Warn when at 80% of limit
+    return current.count >= limit * 0.8;
+  }
+
+  /**
+   * Check if we're rate limited
+   */
+  private isRateLimited(cli: CLITool): boolean {
+    const limitedUntil = this.rateLimitedUntil.get(cli);
+    if (!limitedUntil) return false;
+    return Date.now() < limitedUntil;
+  }
+
+  /**
+   * Mark a CLI as rate limited
+   */
+  private markRateLimited(cli: CLITool, retryAfterSeconds: number = 60): void {
+    this.rateLimitedUntil.set(cli, Date.now() + retryAfterSeconds * 1000);
+  }
+
+  /**
+   * Get rate limit status for all CLIs
+   */
+  getRateLimitStatus(): RateLimitStatus[] {
+    const status: RateLimitStatus[] = [];
+
+    for (const cli of this.availableCLIs) {
+      const current = this.callCounts.get(cli);
+      const limitedUntil = this.rateLimitedUntil.get(cli);
+
+      status.push({
+        cli,
+        callsThisHour: current?.count || 0,
+        lastCallTime: current?.windowStart || 0,
+        isLimited: this.isRateLimited(cli),
+        resetTime: limitedUntil,
+      });
+    }
+
+    return status;
+  }
+
+  /**
+   * Detect rate limit errors in CLI output
+   */
+  private detectRateLimitError(output: string): { isRateLimited: boolean; retryAfter?: number } {
+    const patterns = [
+      /rate.?limit/i,
+      /too.?many.?requests/i,
+      /429/,
+      /quota.?exceeded/i,
+      /limit.?reached/i,
+      /try.?again.?in.?(\d+)/i,
+      /retry.?after.?(\d+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = output.match(pattern);
+      if (match) {
+        // Try to extract retry time
+        const retryMatch = output.match(/(\d+)\s*(second|minute|hour)/i);
+        let retryAfter = 60; // Default 1 minute
+        if (retryMatch) {
+          const value = parseInt(retryMatch[1], 10);
+          const unit = retryMatch[2].toLowerCase();
+          if (unit.startsWith('minute')) retryAfter = value * 60;
+          else if (unit.startsWith('hour')) retryAfter = value * 3600;
+          else retryAfter = value;
+        }
+        return { isRateLimited: true, retryAfter };
+      }
+    }
+
+    return { isRateLimited: false };
+  }
+
+  /**
    * Route a completion request to the appropriate CLI based on phase
    */
   async complete(
@@ -128,13 +251,36 @@ export class ModelRouter {
   }
 
   /**
-   * Send request to a CLI tool
+   * Send request to a CLI tool with rate limit handling
    */
   private async sendToCLI(
     config: ModelConfig,
     options: CompletionOptions
   ): Promise<CompletionResult> {
-    switch (config.cli) {
+    const cli = config.cli;
+
+    // Check if currently rate limited
+    if (this.isRateLimited(cli)) {
+      const resetTime = this.rateLimitedUntil.get(cli);
+      const waitSec = resetTime ? Math.ceil((resetTime - Date.now()) / 1000) : 60;
+      throw new Error(
+        `${cli} is rate limited. Try again in ${waitSec} seconds. ` +
+        `Run 'skunkcontinue' later to resume.`
+      );
+    }
+
+    // Warn if approaching limit
+    if (this.isApproachingLimit(cli)) {
+      const current = this.callCounts.get(cli);
+      const limit = ModelRouter.RATE_LIMITS[cli] || 50;
+      console.log(`⚠️  Approaching rate limit for ${cli} (${current?.count}/${limit} calls this hour)`);
+    }
+
+    // Track this call
+    this.trackCall(cli);
+
+    // Execute the call
+    switch (cli) {
       case 'codex':
         return this.sendToCodex(config, options);
       case 'claude-code':
@@ -302,6 +448,7 @@ export class ModelRouter {
 
   /**
    * Run a CLI command with stdin input and capture output
+   * Detects rate limit errors and marks the CLI as limited
    */
   private runCLIWithStdin(command: string, args: string[], stdin: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -326,7 +473,28 @@ export class ModelRouter {
         if (code === 0) {
           resolve(stdout.trim());
         } else {
-          reject(new Error(`${command} exited with code ${code}: ${stderr}`));
+          // Check for rate limit errors
+          const combined = stdout + stderr;
+          const rateLimit = this.detectRateLimitError(combined);
+
+          if (rateLimit.isRateLimited) {
+            // Mark this CLI as rate limited
+            const cli = command === 'codex' ? 'codex' :
+                       command === 'claude' ? 'claude-code' :
+                       command === 'gemini' ? 'gemini' : null;
+
+            if (cli) {
+              this.markRateLimited(cli as CLITool, rateLimit.retryAfter || 60);
+            }
+
+            reject(new Error(
+              `Rate limited by ${command}. ` +
+              `Try again in ${rateLimit.retryAfter || 60} seconds. ` +
+              `Run 'skunkcontinue' to resume after the limit resets.`
+            ));
+          } else {
+            reject(new Error(`${command} exited with code ${code}: ${stderr}`));
+          }
         }
       });
 
@@ -371,6 +539,127 @@ export class ModelRouter {
       child.on('error', (err) => {
         reject(new Error(`Failed to run ${command}: ${err.message}`));
       });
+    });
+  }
+
+/**
+   * Check auth status for all available CLI tools
+   * Returns issues detected (empty array = all healthy)
+   *
+   * CLI tools can require re-auth mid-session which breaks the pipeline.
+   * This method proactively checks before starting work.
+   */
+  async checkAuthStatus(): Promise<{ cli: CLITool; status: 'ok' | 'needs_auth' | 'error'; message?: string }[]> {
+    await this.ensureInitialized();
+    const results: { cli: CLITool; status: 'ok' | 'needs_auth' | 'error'; message?: string }[] = [];
+
+    for (const cli of this.availableCLIs) {
+      try {
+        const status = await this.checkSingleCLIAuth(cli);
+        results.push(status);
+      } catch (error: any) {
+        results.push({
+          cli,
+          status: 'error',
+          message: error.message,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Check auth status for a single CLI
+   */
+  private async checkSingleCLIAuth(cli: CLITool): Promise<{ cli: CLITool; status: 'ok' | 'needs_auth' | 'error'; message?: string }> {
+    return new Promise((resolve) => {
+      let stdout = '';
+      let stderr = '';
+      let command: string;
+      let args: string[];
+
+      // Different health check commands for each CLI
+      switch (cli) {
+        case 'claude-code':
+          // Claude Code: use /doctor command for health check
+          command = 'claude';
+          args = ['/doctor'];
+          break;
+        case 'codex':
+          // Codex: simple version check to see if it runs
+          command = 'codex';
+          args = ['--version'];
+          break;
+        case 'gemini':
+          // Gemini: version check
+          command = 'gemini';
+          args = ['--version'];
+          break;
+        default:
+          resolve({ cli, status: 'error', message: `Unknown CLI: ${cli}` });
+          return;
+      }
+
+      const child = spawn(command, args, {
+        env: { ...process.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 10000, // 10 second timeout
+      });
+
+      child.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        const combined = stdout + stderr;
+
+        // Check for common re-auth indicators
+        const authPatterns = [
+          /login|authenticate|sign in|authorization|expired|re-auth/i,
+          /token.*invalid|token.*expired/i,
+          /session.*expired/i,
+          /please.*login/i,
+          /unauthorized/i,
+        ];
+
+        for (const pattern of authPatterns) {
+          if (pattern.test(combined)) {
+            resolve({
+              cli,
+              status: 'needs_auth',
+              message: `${cli} may need re-authentication. Check output: ${combined.slice(0, 200)}`,
+            });
+            return;
+          }
+        }
+
+        if (code === 0) {
+          resolve({ cli, status: 'ok' });
+        } else {
+          // Non-zero exit but no auth pattern - could be other issue
+          resolve({
+            cli,
+            status: 'error',
+            message: `${cli} health check failed (exit ${code}): ${combined.slice(0, 200)}`,
+          });
+        }
+      });
+
+      child.on('error', (err) => {
+        resolve({
+          cli,
+          status: 'error',
+          message: `Failed to check ${cli}: ${err.message}`,
+        });
+      });
+
+      // Send empty input for commands that expect it
+      child.stdin?.end();
     });
   }
 

@@ -213,6 +213,46 @@ Track progress visually with GitHub Projects:
 skunk github init
 ```
 
+### Project Management
+
+Manage multiple projects easily:
+
+```bash
+# List all your projects
+skunk projects
+
+# Open a project by number or name
+skunk open 1
+skunk open "recipe app"
+
+# Rename a project
+skunk rename 1 "Better Name"
+```
+
+### Smart Verification
+
+Tests are selected based on what you're building:
+
+| Project Type | What Gets Run |
+|-------------|---------------|
+| Web/JavaScript | `npm test` |
+| iPhone app | Xcode tests |
+| Android app | Gradle tests |
+| Python backend | pytest |
+| Go backend | go test |
+| Rust | cargo test |
+
+### Built for Non-Technical Users
+
+Skunkworks protects you from technical complexity:
+
+- **Interview phase won't build code** - Even if you say "build it," it creates a spec first
+- **Architect won't ask technical questions** - No "React or Vue?" or "SwiftUI or UIKit?" - it decides
+- **Platform compatibility checks** - Warns you if you can't build iOS apps on Windows
+- **Council Synthesizer** - When AIs disagree, the Architect resolves conflicts so you don't have to
+- **CLI health checks** - Detects auth issues before starting, not mid-build
+- **Rate limit handling** - Pauses gracefully instead of crashing when hitting API limits
+
 ## Commands
 
 | Command | What It Does |
@@ -220,6 +260,9 @@ skunk github init
 | `skunk new "idea"` | Start a new project |
 | `skunk continue` | Resume from where you left off |
 | `skunk status` | Show project progress |
+| `skunk projects` | List all your projects |
+| `skunk open <num/name>` | Open and continue a project |
+| `skunk rename <id> <name>` | Rename a project |
 | `skunk dashboard` | View all projects (CLI) |
 | `skunk dashboard --web` | Open web dashboard in browser |
 | `skunk dashboard --scan [path]` | Discover projects in directory |

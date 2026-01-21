@@ -565,3 +565,89 @@ The user values:
 - Visual progress tracking (GitHub Projects)
 - Multiple AI models catching each other's blind spots
 - Verification that things actually work, not just code review
+
+---
+
+## Features Added (January 21, 2026)
+
+### 1. Pipeline Bypass Prevention
+
+**The Problem:** A session showed Claude (as Interviewer) building code when user said "build it", bypassing the entire pipeline.
+
+**The Fix:** Added explicit guardrails to prompts:
+
+**Interviewer (`prompts/interviewer.md`):**
+```
+CRITICAL: DO NOT BUILD CODE.
+Your ONLY job is to create SPEC.md.
+If the user says "build it", respond: "I've captured everything in the spec. The building happens automatically in the next phase."
+```
+
+**Architect (`prompts/architect.md`):**
+```
+CRITICAL: The User is Non-Technical
+Do NOT ask: "SwiftUI or UIKit?", "React or Vue?", etc.
+You are the expert. Make these decisions yourself.
+```
+
+### 2. Project Naming
+
+Interview now asks for a project name:
+- "What should we call this project?"
+- Auto-generates from description if skipped
+- Name extracted from SPEC.md title
+- Stored in global registry
+
+### 3. Project Selection Commands
+
+```bash
+skunkworks projects              # List all projects with status
+skunkworks open 1                # Open project by number
+skunkworks open "Heart Rate"     # Open by name (partial match)
+skunkworks rename 1 "New Name"   # Rename a project
+```
+
+### 4. Project Type Detection
+
+Interview asks what type of project:
+- Website / web app → `web`
+- Mobile app → `ios`, `android`
+- Desktop app → `desktop`
+- Command-line tool → `cli`
+- Backend/API → `backend`
+
+Supports composites: `['web', 'backend']` for full-stack apps.
+
+**Used for:** Selecting appropriate verification tools per project type.
+
+### 5. Registry Enhancements
+
+New functions in `src/dashboard/registry.ts`:
+- `findProjectByName(searchTerm)` - Case-insensitive partial match
+- `findProjectByIndex(index)` - 1-based index for user-friendliness
+- `updateProjectName(path, name)` - Update project name
+
+---
+
+## Remaining Work (In Progress)
+
+### Phase Lock Enforcement
+- State machine + tool whitelisting to prevent unauthorized actions
+- Interview can only write SPEC.md
+- Architect can only write ARCHITECTURE.md, DESIGN_SPEC.yaml
+- Implementation location: `src/harness/router.ts`
+
+### Dependency Detection & Installation
+- Detect required runtimes from ARCHITECTURE.md
+- Use version managers (nvm, pyenv) to avoid sudo
+- Ask user consent before installing
+
+### Recovery UX
+- Categorize errors (missing dep, test failure, permission)
+- Provide actionable options, never just "fix manually"
+
+---
+
+## Session Context File
+
+For detailed implementation notes, see: `.skunkworks/SESSION_CONTEXT.md`

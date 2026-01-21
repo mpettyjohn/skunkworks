@@ -43,10 +43,13 @@ export interface ChunkState {
   phases: ChunkPhase[];
 }
 
+export type ProjectType = 'web' | 'ios' | 'android' | 'desktop' | 'cli' | 'backend' | 'library';
+
 export interface ProjectState {
   projectName: string;
   projectPath: string;
   currentPhase: 'interviewer' | 'architect' | 'builder' | 'reviewer' | 'complete';
+  projectTypes?: ProjectType[];  // e.g., ['web', 'backend'] for full-stack
   todos: TodoItem[];
   artifacts: {
     spec?: string;
@@ -133,6 +136,20 @@ export class StateManager {
     this.addHistory('phase_change', `Changed to ${phase}`);
     this.state.currentPhase = phase;
     this.saveState();
+  }
+
+  // Project type management
+  setProjectTypes(types: ProjectType[]): void {
+    this.state.projectTypes = types;
+    this.saveState();
+  }
+
+  getProjectTypes(): ProjectType[] {
+    return this.state.projectTypes || [];
+  }
+
+  hasProjectType(type: ProjectType): boolean {
+    return (this.state.projectTypes || []).includes(type);
   }
 
   // Todo management

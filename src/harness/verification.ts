@@ -48,10 +48,91 @@ export async function hasTestScript(projectPath: string): Promise<boolean> {
   }
 }
 
+type ProjectType = 'web' | 'ios' | 'android' | 'desktop' | 'cli' | 'backend' | 'library';
+
 /**
- * Get the test command for the project
+ * Get the test command for the project based on project type
  */
-export function getTestCommand(projectPath: string): string | null {
+export function getTestCommand(projectPath: string, projectTypes?: ProjectType[]): string | null {
+  // Check for project-type-specific test configurations first
+  if (projectTypes && projectTypes.length > 0) {
+    for (const type of projectTypes) {
+      const typeCommand = getTestCommandForType(projectPath, type);
+      if (typeCommand) {
+        return typeCommand;
+      }
+    }
+  }
+
+  // Fall back to standard detection
+  return getStandardTestCommand(projectPath);
+}
+
+/**
+ * Get test command specific to a project type
+ */
+function getTestCommandForType(projectPath: string, type: ProjectType): string | null {
+  switch (type) {
+    case 'ios':
+      // Check for Xcode project
+      if (hasXcodeProject(projectPath)) {
+        return 'xcodebuild test -scheme $(xcodebuild -list -json | jq -r ".project.schemes[0]") -destination "platform=iOS Simulator,name=iPhone 15"';
+      }
+      return null;
+
+    case 'android':
+      // Check for Gradle
+      if (fs.existsSync(path.join(projectPath, 'gradlew'))) {
+        return './gradlew test';
+      }
+      if (fs.existsSync(path.join(projectPath, 'build.gradle')) ||
+          fs.existsSync(path.join(projectPath, 'build.gradle.kts'))) {
+        return 'gradle test';
+      }
+      return null;
+
+    case 'backend':
+      // Python backends
+      if (fs.existsSync(path.join(projectPath, 'pytest.ini')) ||
+          fs.existsSync(path.join(projectPath, 'pyproject.toml')) ||
+          fs.existsSync(path.join(projectPath, 'setup.py'))) {
+        return 'pytest';
+      }
+      // Go backends
+      if (fs.existsSync(path.join(projectPath, 'go.mod'))) {
+        return 'go test ./...';
+      }
+      // Rust backends
+      if (fs.existsSync(path.join(projectPath, 'Cargo.toml'))) {
+        return 'cargo test';
+      }
+      // Fall through to standard npm test
+      return getStandardTestCommand(projectPath);
+
+    case 'web':
+    case 'desktop':
+    case 'cli':
+    case 'library':
+      // These typically use npm test or similar
+      return getStandardTestCommand(projectPath);
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * Check if project has an Xcode project file
+ */
+function hasXcodeProject(projectPath: string): boolean {
+  const files = fs.readdirSync(projectPath);
+  return files.some(f => f.endsWith('.xcodeproj') || f.endsWith('.xcworkspace'));
+}
+
+/**
+ * Get standard npm/yarn test command
+ */
+function getStandardTestCommand(projectPath: string): string | null {
   const packageJsonPath = path.join(projectPath, 'package.json');
 
   if (!fs.existsSync(packageJsonPath)) {
@@ -75,8 +156,8 @@ export function getTestCommand(projectPath: string): string | null {
 /**
  * Run tests and capture results
  */
-export async function runTests(projectPath: string): Promise<TestResult> {
-  const testCommand = getTestCommand(projectPath);
+export async function runTests(projectPath: string, projectTypes?: ProjectType[]): Promise<TestResult> {
+  const testCommand = getTestCommand(projectPath, projectTypes);
 
   if (!testCommand) {
     return {

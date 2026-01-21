@@ -147,6 +147,50 @@ export function getProjectByPath(projectPath: string): ProjectEntry | undefined 
 }
 
 /**
+ * Find a project by name (case-insensitive, partial match)
+ */
+export function findProjectByName(searchTerm: string): ProjectEntry | undefined {
+  const registry = initRegistry();
+  const term = searchTerm.toLowerCase();
+
+  // Try exact match first
+  const exact = registry.projects.find(p => p.name.toLowerCase() === term);
+  if (exact) return exact;
+
+  // Try partial match
+  return registry.projects.find(p => p.name.toLowerCase().includes(term));
+}
+
+/**
+ * Find a project by index (1-based for user-friendliness)
+ */
+export function findProjectByIndex(index: number): ProjectEntry | undefined {
+  const registry = initRegistry();
+  // Sort by lastAccessedAt descending to match display order
+  const sorted = [...registry.projects].sort((a, b) =>
+    new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
+  );
+  return sorted[index - 1]; // Convert to 0-based
+}
+
+/**
+ * Update a project's name
+ */
+export function updateProjectName(projectPath: string, newName: string): boolean {
+  const registry = initRegistry();
+  const absolutePath = path.resolve(projectPath);
+  const id = generateProjectId(absolutePath);
+
+  const project = registry.projects.find(p => p.id === id);
+  if (project) {
+    project.name = newName;
+    saveRegistry(registry);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Update the last accessed time for a project
  */
 export function touchProject(projectPath: string): void {

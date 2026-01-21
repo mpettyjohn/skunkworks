@@ -53,6 +53,11 @@ import {
   renderDashboard,
   renderScanResults,
   renderPruneResults,
+  listProjects,
+  findProjectByName,
+  findProjectByIndex,
+  touchProject,
+  updateProjectName,
 } from './dashboard/index.js';
 import { startServer } from './dashboard/web/server.js';
 
@@ -1034,6 +1039,152 @@ program
     // CLI dashboard (default)
     const projects = getAllProjectStatuses();
     console.log(renderDashboard(projects));
+  });
+
+/**
+ * List and select projects
+ */
+program
+  .command('projects')
+  .description('List all Skunkworks projects')
+  .action(async () => {
+    // Auto-prune stale entries
+    pruneStale();
+
+    const projects = listProjects();
+
+    if (projects.length === 0) {
+      console.log(chalk.yellow('\n  No projects found.\n'));
+      console.log(chalk.gray('  Start a new project with:'));
+      console.log(chalk.white('    skunkworks new "describe your idea"\n'));
+      return;
+    }
+
+    // Sort by last accessed
+    const sorted = [...projects].sort((a, b) =>
+      new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
+    );
+
+    console.log(chalk.blue.bold('\n  SKUNKWORKS PROJECTS\n'));
+
+    for (let i = 0; i < sorted.length; i++) {
+      const project = sorted[i];
+      const statePath = path.join(project.path, '.skunkworks', 'state.json');
+      let phase = 'unknown';
+      let phaseColor = chalk.gray;
+
+      try {
+        if (fs.existsSync(statePath)) {
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          phase = state.currentPhase || 'unknown';
+
+          // Color based on phase
+          if (phase === 'complete') phaseColor = chalk.green;
+          else if (phase === 'builder') phaseColor = chalk.cyan;
+          else if (phase === 'reviewer') phaseColor = chalk.yellow;
+          else if (phase === 'interviewer') phaseColor = chalk.magenta;
+          else if (phase === 'architect') phaseColor = chalk.blue;
+        }
+      } catch {
+        // Ignore state read errors
+      }
+
+      const dateStr = new Date(project.lastAccessedAt).toLocaleDateString();
+      const num = chalk.gray(`${i + 1}.`);
+      const name = chalk.white.bold(project.name);
+      const phaseStr = phaseColor(phase.toUpperCase());
+
+      console.log(`  ${num} ${name}`);
+      console.log(chalk.gray(`     ${dateStr}  `) + phaseStr);
+      console.log(chalk.gray(`     ${project.path}\n`));
+    }
+
+    console.log(chalk.gray('  ─────────────────────────────────────────\n'));
+    console.log(chalk.white('  Commands:\n'));
+    console.log(chalk.gray('    skunkworks open 1              Open project #1'));
+    console.log(chalk.gray('    skunkworks open "Heart Rate"   Open by name'));
+    console.log(chalk.gray('    skunkworks new "idea"          Start new project\n'));
+  });
+
+/**
+ * Open a specific project
+ */
+program
+  .command('open <identifier>')
+  .description('Open a project by number or name')
+  .action(async (identifier: string) => {
+    // Auto-prune stale entries
+    pruneStale();
+
+    let project;
+
+    // Try to parse as number first
+    const num = parseInt(identifier, 10);
+    if (!isNaN(num)) {
+      project = findProjectByIndex(num);
+    } else {
+      // Try to find by name
+      project = findProjectByName(identifier);
+    }
+
+    if (!project) {
+      console.log(chalk.red(`\n  Project not found: ${identifier}\n`));
+      console.log(chalk.gray('  Run "skunkworks projects" to see available projects.\n'));
+      return;
+    }
+
+    // Update last accessed time
+    touchProject(project.path);
+
+    console.log(chalk.blue.bold(`\n  Opening: ${project.name}\n`));
+    console.log(chalk.gray(`  Path: ${project.path}\n`));
+
+    // Check if state exists
+    const statePath = path.join(project.path, '.skunkworks', 'state.json');
+    if (!fs.existsSync(statePath)) {
+      console.log(chalk.yellow('  Project state not found. Initializing...\n'));
+    }
+
+    // Continue the project
+    const orchestrator = new Orchestrator({
+      projectPath: project.path,
+      verbose: true,
+    });
+
+    await orchestrator.continue();
+  });
+
+/**
+ * Rename a project
+ */
+program
+  .command('rename <identifier> <newName>')
+  .description('Rename a project')
+  .option('-p, --path <path>', 'Project path (alternative to identifier)')
+  .action(async (identifier: string, newName: string, options: { path?: string }) => {
+    let projectPath: string;
+
+    if (options.path) {
+      projectPath = path.resolve(options.path);
+    } else {
+      // Find project by identifier
+      const num = parseInt(identifier, 10);
+      const project = !isNaN(num) ? findProjectByIndex(num) : findProjectByName(identifier);
+
+      if (!project) {
+        console.log(chalk.red(`\n  Project not found: ${identifier}\n`));
+        return;
+      }
+      projectPath = project.path;
+    }
+
+    const success = updateProjectName(projectPath, newName);
+
+    if (success) {
+      console.log(chalk.green(`\n  ✓ Renamed to: ${newName}\n`));
+    } else {
+      console.log(chalk.red(`\n  Failed to rename project.\n`));
+    }
   });
 
 // Interactive mode if no command provided

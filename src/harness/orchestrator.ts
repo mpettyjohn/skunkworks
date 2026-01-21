@@ -26,6 +26,12 @@ import {
   formatVisualResultsForContext,
 } from './visual-verification.js';
 import {
+  detectRequiredRuntimes,
+  checkMissingRuntimes,
+  promptForDependencies,
+  showInstallInstructions,
+} from './dependency-manager.js';
+import {
   runDesignVerification,
   formatDesignResultsForContext,
 } from './design-verification.js';
@@ -135,6 +141,79 @@ export interface OrchestratorOptions {
   verbose?: boolean;
 }
 
+/**
+ * Pipeline phases in order
+ */
+type PipelinePhase = 'interview' | 'council-spec' | 'architect' | 'council-arch' | 'builder' | 'reviewer' | 'complete';
+
+/**
+ * Render the pipeline visualization showing current progress
+ */
+function renderPipeline(currentPhase: PipelinePhase, completedPhases: PipelinePhase[] = []): string {
+  const phases: { id: PipelinePhase; label: string; model: string }[] = [
+    { id: 'interview', label: 'Interview', model: 'Claude Opus 4.5' },
+    { id: 'council-spec', label: 'Council Review', model: 'Codex + Gemini' },
+    { id: 'architect', label: 'Architect', model: 'GPT-5.2-Codex' },
+    { id: 'council-arch', label: 'Council Review', model: 'Codex + Gemini' },
+    { id: 'builder', label: 'Builder', model: 'Claude Opus 4.5' },
+    { id: 'reviewer', label: 'Reviewer', model: 'Gemini 3' },
+  ];
+
+  let output = '\n' + chalk.gray('  ─────────────────────────────────────────\n');
+  output += chalk.white.bold('  PIPELINE STATUS\n');
+  output += chalk.gray('  ─────────────────────────────────────────\n\n');
+
+  for (const phase of phases) {
+    const isComplete = completedPhases.includes(phase.id);
+    const isCurrent = phase.id === currentPhase;
+
+    let status: string;
+    let label: string;
+
+    if (isComplete) {
+      status = chalk.green('  ✓');
+      label = chalk.gray(`${phase.label}`);
+    } else if (isCurrent) {
+      status = chalk.cyan('  ▶');
+      label = chalk.white.bold(`${phase.label}`) + chalk.cyan(` ← YOU ARE HERE`);
+    } else {
+      status = chalk.gray('  ○');
+      label = chalk.gray(`${phase.label}`);
+    }
+
+    output += `${status} ${label}\n`;
+    output += chalk.gray(`      ${phase.model}\n\n`);
+  }
+
+  output += chalk.gray('  ─────────────────────────────────────────\n');
+  return output;
+}
+
+/**
+ * Render a phase completion banner
+ */
+function renderPhaseComplete(phase: string, artifact?: string): string {
+  let output = '\n';
+  output += chalk.green('  ╔═══════════════════════════════════════════════════════════╗\n');
+  output += chalk.green('  ║') + chalk.green.bold(`  ✓ ${phase.toUpperCase()} COMPLETE`) + ' '.repeat(44 - phase.length) + chalk.green('║\n');
+  output += chalk.green('  ╚═══════════════════════════════════════════════════════════╝\n');
+  if (artifact) {
+    output += chalk.gray(`\n  Created: ${artifact}\n`);
+  }
+  return output;
+}
+
+/**
+ * Render what's happening next
+ */
+function renderNextStep(nextPhase: string, description: string, model: string): string {
+  let output = '\n';
+  output += chalk.white.bold(`  NEXT: ${nextPhase}\n\n`);
+  output += chalk.gray(`  ${description}\n`);
+  output += chalk.gray(`  Using: ${model}\n\n`);
+  return output;
+}
+
 export class Orchestrator {
   private state: StateManager;
   private router: ModelRouter;
@@ -155,6 +234,12 @@ export class Orchestrator {
 
     // Wait for CLI detection to complete
     await this.router.ensureInitialized();
+
+    // Check CLI auth status before starting
+    const authCheck = await this.checkCLIHealth();
+    if (!authCheck) {
+      return; // User chose not to proceed
+    }
 
     // Initialize GitHub if configured
     this.initGitHub();
@@ -190,6 +275,13 @@ export class Orchestrator {
    */
   async continue(): Promise<void> {
     await this.router.ensureInitialized();
+
+    // Check CLI auth status before continuing
+    const authCheck = await this.checkCLIHealth();
+    if (!authCheck) {
+      return; // User chose not to proceed
+    }
+
     this.initGitHub();
     const currentPhase = this.state.getCurrentPhase();
     console.log(chalk.blue(`\n📍 Continuing from ${currentPhase} phase...\n`));
@@ -262,6 +354,7 @@ Your goal is to create a SPEC.md document by understanding:
 3. What it should DO (features, behaviors, user experience)
 4. What success looks like
 5. Any constraints (timeline, existing tools to integrate with)
+6. What type of project this is (web, mobile, desktop, CLI, backend, etc.)
 
 Use AskUserQuestion for:
 - Clarifying what they want ("Which of these matters more to you?")
@@ -273,7 +366,12 @@ Do NOT use AskUserQuestion to ask:
 - "Do you prefer REST or GraphQL?"
 - Any technical implementation questions
 
+Before creating the spec, ask what they want to call this project:
+"What should we call this project? (This helps you find it later)"
+If they skip, generate a short name from the description (e.g., "heart-rate-tracker").
+
 When you have enough information, create .skunkworks/SPEC.md with:
+- Project name as the title: "# [Name] - Product Specification"
 - Overview (plain language description)
 - Target Users
 - User Stories ("Users can...")
@@ -281,6 +379,14 @@ When you have enough information, create .skunkworks/SPEC.md with:
 - Constraints
 - Out of Scope
 - Notes for Technical Team (things YOU inferred, not things they told you)
+
+CRITICAL: DO NOT BUILD CODE.
+Your ONLY job is to create SPEC.md. You are the Interviewer, not the Builder.
+If the user says "build it", "let's build", or similar:
+1. Do NOT write any code or create project files
+2. Confirm you've captured their requirements in SPEC.md
+3. Say: "I've captured everything in the spec. The building happens automatically in the next phase."
+After creating SPEC.md, your job is DONE. Do not continue to the next step yourself.
 
 ${initialPrompt ? `\nThe user's initial project idea: "${initialPrompt}"` : ''}
 
@@ -296,24 +402,130 @@ Start by understanding their vision. Be conversational and friendly.`;
       await this.router.runInteractive(interviewPrompt, this.state.getProjectPath());
 
       console.log(chalk.gray('\n-------------------------------------------'));
-      console.log(chalk.green('\n✓ Interview complete!\n'));
+
+      // Validate phase boundary - Interview should only create SPEC.md
+      const violation = await this.validateInterviewOutputs();
+      if (violation) {
+        console.log(chalk.red('\n⚠️  Phase Boundary Violation Detected\n'));
+        console.log(chalk.yellow(`  The Interview phase created unauthorized files:`));
+        console.log(chalk.gray(`  ${violation.files.join('\n  ')}\n`));
+        console.log(chalk.yellow('  The Interview phase should ONLY create SPEC.md.'));
+        console.log(chalk.yellow('  These files have been removed. Please run the interview again.\n'));
+
+        // Clean up unauthorized files
+        for (const file of violation.files) {
+          try {
+            fs.unlinkSync(path.join(this.state.getProjectPath(), file));
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+        return;
+      }
 
       // Check if SPEC.md was created
       const spec = this.state.getSpec();
       if (spec) {
-        console.log(chalk.green('📄 SPEC.md created successfully.'));
+        // Extract project name from spec and update registry
+        const projectName = this.extractProjectName(spec);
+        if (projectName) {
+          const { updateProjectName } = await import('../dashboard/registry.js');
+          updateProjectName(this.state.getProjectPath(), projectName);
+          console.log(chalk.blue(`\n  Project: ${projectName}\n`));
+        }
+
+        // Extract and store project types
+        const projectTypes = this.extractProjectTypes(spec);
+        if (projectTypes.length > 0) {
+          this.state.setProjectTypes(projectTypes);
+          console.log(chalk.gray(`  Type: ${projectTypes.join(', ')}\n`));
+
+          // Check platform compatibility
+          const compatibility = this.checkPlatformCompatibility(projectTypes);
+          if (!compatibility.compatible) {
+            console.log(chalk.red(`\n⚠️  Platform Compatibility Issue\n`));
+            console.log(chalk.white(`  ${compatibility.message}\n`));
+
+            if (compatibility.suggestions && compatibility.suggestions.length > 0) {
+              console.log(chalk.gray('  Suggestions:'));
+              for (const suggestion of compatibility.suggestions) {
+                console.log(chalk.white(`    • ${suggestion}`));
+              }
+              console.log();
+            }
+
+            // Ask if user wants to continue anyway
+            const readline = await import('readline');
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+            });
+
+            const proceed = await new Promise<boolean>((resolve) => {
+              rl.question(chalk.yellow('  Continue anyway? (y/N): '), (answer) => {
+                rl.close();
+                resolve(answer.toLowerCase() === 'y');
+              });
+            });
+
+            if (!proceed) {
+              console.log(chalk.gray('\n  Paused. Consider changing project type or using a compatible machine.\n'));
+              return;
+            }
+          }
+        }
+
+        // Show phase completion banner
+        console.log(renderPhaseComplete('Interview', '.skunkworks/SPEC.md'));
+
+        // Show pipeline status
+        console.log(renderPipeline('council-spec', ['interview']));
+
+        // Show what's next
+        console.log(renderNextStep(
+          'Council Review',
+          'Multiple AI models will review your spec to catch\n  any gaps or unclear requirements before we design the system.',
+          'Codex + Gemini (in parallel)'
+        ));
+
+        // Prompt user to continue
+        const readline = await import('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+
+        const continueToCouncil = await new Promise<boolean>((resolve) => {
+          rl.question(chalk.green('  Press Enter to continue (or "q" to stop here): '), (answer) => {
+            rl.close();
+            resolve(answer.toLowerCase() !== 'q');
+          });
+        });
+
+        if (!continueToCouncil) {
+          console.log(chalk.gray('\n  Paused. Run "skunkcontinue" to resume.\n'));
+          return;
+        }
 
         // Run council review on the spec before moving to architect
         const proceed = await this.runCouncilReviewSpec(spec);
 
         if (proceed) {
-          console.log(chalk.blue('\nMoving to architect phase (GPT-5.2-Codex)...'));
+          // Show transition to architect
+          console.log(renderPhaseComplete('Council Review (Spec)', '.skunkworks/COUNCIL_FEEDBACK_SPEC.md'));
+          console.log(renderPipeline('architect', ['interview', 'council-spec']));
+          console.log(renderNextStep(
+            'Architect',
+            'GPT-5.2-Codex will design the system architecture\n  and create a detailed implementation plan.',
+            'GPT-5.2-Codex (Extra High reasoning)'
+          ));
+
           this.state.setPhase('architect');
           await this.runArchitectPhase();
         }
         // If not proceeding, user wants to revise - don't advance phase
       } else {
-        console.log(chalk.yellow('⚠️  No SPEC.md found. Run "skunkinterview" to continue.'));
+        console.log(chalk.yellow('\n⚠️  No SPEC.md found. Run "skunkinterview" to continue.\n'));
       }
     } catch (error) {
       console.log(chalk.red(`\nInterview phase error: ${error}`));
@@ -370,18 +582,26 @@ Based on this specification, please:
 2. Create ARCHITECTURE.md with component diagrams and design decisions
 3. Create a detailed TODO.md with implementation tasks
 
-Focus on creating a clear, implementable architecture.`,
+IMPORTANT: The user is non-technical. Do NOT ask them technical questions like "Should we use X or Y framework?" - make those decisions yourself based on the requirements. You are the expert architect; use your expertise to make good choices and document them.
+
+Focus on creating a clear, implementable architecture. When you're done, type "done" to proceed.`,
       });
     } else if (initialPrompt) {
       messages.push({
         role: 'user',
-        content: `I want to build: ${initialPrompt}\n\nPlease design the architecture and create a detailed implementation plan.`,
+        content: `I want to build: ${initialPrompt}
+
+Please design the architecture and create a detailed implementation plan.
+
+IMPORTANT: The user is non-technical. Do NOT ask them technical questions - make architectural decisions yourself based on the requirements. You are the expert.`,
       });
     } else {
       console.log(chalk.yellow('⚠️  No SPEC.md found. Consider running "skunkinterview" first.\n'));
       messages.push({
         role: 'user',
-        content: 'Please help me design a software architecture. What project would you like to design?',
+        content: `Please help me design a software architecture based on requirements I'll provide.
+
+IMPORTANT: The user is non-technical. Do NOT ask technical questions like "Should we use React or Vue?" - if you need to understand the project better, ask about what they want to achieve, not how to build it.`,
       });
     }
 
@@ -405,6 +625,15 @@ Focus on creating a clear, implementable architecture.`,
     if (!spec) {
       console.log(chalk.red('No specification found. Please run architect phase first.'));
       return;
+    }
+
+    // Check for missing dependencies before building
+    if (architecture) {
+      const depResult = await this.checkDependencies(architecture);
+      if (depResult === 'pause') {
+        console.log(chalk.gray('\nPaused. Run "skunkcontinue" after installing dependencies.\n'));
+        return;
+      }
     }
 
     // Check for implementation phases in architecture
@@ -507,12 +736,14 @@ Focus on creating a clear, implementable architecture.`,
       console.log(chalk.cyan('Launching Claude Code for this phase...\n'));
       const builderOutput = await this.runSinglePhaseBuilder(currentPhase, phaseContext);
 
-      // Run verification
+      // Run verification (using project-type-specific test commands)
       const verificationLevel: VerificationLevel = currentPhase.isMilestone ? 'full' : 'tests';
+      const projectTypes = this.state.getProjectTypes();
       let verifyResult = await runChunkVerification(
         this.state.getProjectPath(),
         verificationLevel,
-        spec
+        spec,
+        projectTypes
       );
 
       // Handle verification failure with auto-fix
@@ -542,7 +773,8 @@ Focus on creating a clear, implementable architecture.`,
           verifyResult = await runChunkVerification(
             this.state.getProjectPath(),
             verificationLevel,
-            spec
+            spec,
+            projectTypes
           );
 
           if (verifyResult.passed) {
@@ -554,12 +786,17 @@ Focus on creating a clear, implementable architecture.`,
 
         if (!fixed) {
           this.state.markChunkPhaseFailed();
-          console.log(chalk.red('\n❌ Auto-fix failed after 2 attempts.'));
-          console.log(chalk.yellow('Please fix the issues manually and run: skunkcontinue\n'));
-          console.log(chalk.gray('Error details saved to .skunkworks/CHUNK_CONTEXT.md'));
 
-          // Save the error context for manual debugging
-          const errorContext = `# Build Stopped - Manual Fix Required
+          // Provide better recovery UX
+          const recoveryChoice = await this.showRecoveryOptions(
+            currentPhase.name,
+            verifyResult.errorOutput,
+            previousAttempts
+          );
+
+          if (recoveryChoice === 'pause') {
+            // Save the error context for manual debugging
+            const errorContext = `# Build Stopped - Manual Fix Required
 
 ## Phase
 ${currentPhase.name}
@@ -570,7 +807,19 @@ ${verifyResult.errorOutput}
 ## Previous Fix Attempts
 ${previousAttempts.map((a, i) => `### Attempt ${i + 1}\n${a.slice(0, 1000)}`).join('\n\n')}
 `;
-          this.state.saveChunkContext(errorContext);
+            this.state.saveChunkContext(errorContext);
+            return;
+          } else if (recoveryChoice === 'skip') {
+            console.log(chalk.yellow('\n⚠️  Skipping this phase. Continuing with next phase...\n'));
+            this.state.setChunkPhaseStatus('completed');
+            this.state.resetFixAttempts();
+            this.state.advanceChunkPhase();
+            continue;
+          } else if (recoveryChoice === 'retry') {
+            // Reset and try from scratch
+            this.state.resetFixAttempts();
+            continue;
+          }
           return;
         }
       }
@@ -593,8 +842,14 @@ ${previousAttempts.map((a, i) => `### Attempt ${i + 1}\n${a.slice(0, 1000)}`).jo
       this.state.createCheckpoint(`chunk_phase_${phaseIndex + 1}_complete`);
     }
 
-    console.log(chalk.green.bold('\n🎉 All phases complete!\n'));
-    console.log(chalk.blue('Moving to reviewer phase...\n'));
+    // Show builder completion
+    console.log(renderPhaseComplete('Builder', 'Your project code'));
+    console.log(renderPipeline('reviewer', ['interview', 'council-spec', 'architect', 'council-arch', 'builder']));
+    console.log(renderNextStep(
+      'Reviewer',
+      'Gemini 3 will review the implementation for bugs,\n  security issues, and spec compliance.',
+      'Gemini 3 Flash'
+    ));
     await this.runReviewerPhase();
   }
 
@@ -962,18 +1217,57 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
 
           // Move to next phase
           if (phase === 'architect') {
+            // Show architect completion
+            console.log(renderPhaseComplete('Architect', '.skunkworks/ARCHITECTURE.md'));
+            console.log(renderPipeline('council-arch', ['interview', 'council-spec', 'architect']));
+
             // Run council review on the architecture before moving to builder
             const architecture = this.state.getArchitecture();
             if (architecture) {
               await this.runCouncilReview(architecture);
             }
-            console.log(chalk.blue('\nMoving to builder phase...'));
+
+            // Show transition to builder
+            console.log(renderPhaseComplete('Council Review (Architecture)', '.skunkworks/COUNCIL_FEEDBACK.md'));
+            console.log(renderPipeline('builder', ['interview', 'council-spec', 'architect', 'council-arch']));
+            console.log(renderNextStep(
+              'Builder',
+              'Claude Opus 4.5 will implement the code based on\n  the architecture. This is where your project gets built.',
+              'Claude Opus 4.5'
+            ));
+
             this.state.setPhase('builder');
           } else if (phase === 'builder') {
-            console.log(chalk.blue('\nMoving to reviewer phase...'));
+            // Show builder completion
+            console.log(renderPhaseComplete('Builder', 'Your project code'));
+            console.log(renderPipeline('reviewer', ['interview', 'council-spec', 'architect', 'council-arch', 'builder']));
+            console.log(renderNextStep(
+              'Reviewer',
+              'Gemini 3 will review the implementation for bugs,\n  security issues, and spec compliance.',
+              'Gemini 3 Flash'
+            ));
+
             this.state.setPhase('reviewer');
           } else if (phase === 'reviewer') {
-            console.log(chalk.green('\n✅ All phases complete!'));
+            // Show final completion
+            console.log(renderPhaseComplete('Reviewer', '.skunkworks/REVIEW.md'));
+
+            console.log('\n');
+            console.log(chalk.green.bold('  ╔═══════════════════════════════════════════════════════════╗'));
+            console.log(chalk.green.bold('  ║                                                           ║'));
+            console.log(chalk.green.bold('  ║              🎉  PROJECT COMPLETE!  🎉                    ║'));
+            console.log(chalk.green.bold('  ║                                                           ║'));
+            console.log(chalk.green.bold('  ╚═══════════════════════════════════════════════════════════╝'));
+            console.log('\n');
+            console.log(chalk.white('  Your project has been:'));
+            console.log(chalk.gray('    ✓ Specified (SPEC.md)'));
+            console.log(chalk.gray('    ✓ Reviewed by council (COUNCIL_FEEDBACK_SPEC.md)'));
+            console.log(chalk.gray('    ✓ Architected (ARCHITECTURE.md)'));
+            console.log(chalk.gray('    ✓ Reviewed by council (COUNCIL_FEEDBACK.md)'));
+            console.log(chalk.gray('    ✓ Built (your code)'));
+            console.log(chalk.gray('    ✓ Reviewed (REVIEW.md)'));
+            console.log('\n');
+
             this.state.setPhase('complete');
 
             // Auto-capture learnings
@@ -1057,6 +1351,389 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
   }
 
   /**
+   * Show recovery options when a build fails
+   */
+  private async showRecoveryOptions(
+    phaseName: string,
+    errorOutput: string,
+    previousAttempts: string[]
+  ): Promise<'pause' | 'skip' | 'retry'> {
+    console.log(chalk.red('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log(chalk.red.bold('  Build Failed'));
+    console.log(chalk.red('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+
+    // Categorize the error
+    const errorCategory = this.categorizeError(errorOutput);
+    console.log(chalk.white(`  Phase: ${phaseName}`));
+    console.log(chalk.white(`  Issue: ${errorCategory.summary}\n`));
+
+    if (errorCategory.suggestion) {
+      console.log(chalk.cyan(`  💡 ${errorCategory.suggestion}\n`));
+    }
+
+    // Show truncated error
+    const errorLines = errorOutput.split('\n').slice(0, 10);
+    console.log(chalk.gray('  Error details:'));
+    for (const line of errorLines) {
+      console.log(chalk.gray(`    ${line.slice(0, 80)}`));
+    }
+    if (errorOutput.split('\n').length > 10) {
+      console.log(chalk.gray('    ... (more in .skunkworks/CHUNK_CONTEXT.md)'));
+    }
+    console.log();
+
+    // Options
+    console.log(chalk.white('  What would you like to do?\n'));
+    console.log(chalk.white('  [1] Pause and come back later'));
+    console.log(chalk.gray('      Save progress and exit. Run "skunkcontinue" to resume.'));
+    console.log();
+    console.log(chalk.white('  [2] Skip this phase and continue'));
+    console.log(chalk.gray('      Move to the next phase. Some features may not work.'));
+    console.log();
+    console.log(chalk.white('  [3] Try again from scratch'));
+    console.log(chalk.gray('      Reset this phase and attempt to build it again.'));
+    console.log();
+
+    const readline = await import('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+      rl.question(chalk.green('  Your choice [1]: '), (answer) => {
+        rl.close();
+        const choice = answer.trim() || '1';
+        if (choice === '2') resolve('skip');
+        else if (choice === '3') resolve('retry');
+        else resolve('pause');
+      });
+    });
+  }
+
+  /**
+   * Categorize an error to provide helpful context
+   */
+  private categorizeError(errorOutput: string): { summary: string; suggestion?: string } {
+    const lower = errorOutput.toLowerCase();
+
+    // Missing dependency
+    if (lower.includes('cannot find module') || lower.includes('module not found')) {
+      const match = errorOutput.match(/cannot find module ['"]([^'"]+)['"]/i);
+      const module = match ? match[1] : 'a package';
+      return {
+        summary: `Missing dependency: ${module}`,
+        suggestion: `Try running "npm install" or "npm install ${module}"`,
+      };
+    }
+
+    // TypeScript errors
+    if (lower.includes('ts') && (lower.includes('error') || lower.includes('cannot find name'))) {
+      return {
+        summary: 'TypeScript compilation error',
+        suggestion: 'There may be a type mismatch or missing type definition.',
+      };
+    }
+
+    // Test failures
+    if (lower.includes('test failed') || lower.includes('assertion') || lower.includes('expect')) {
+      return {
+        summary: 'Test failures',
+        suggestion: 'Some tests are not passing. The code may not match the expected behavior.',
+      };
+    }
+
+    // Permission errors
+    if (lower.includes('permission denied') || lower.includes('eacces')) {
+      return {
+        summary: 'Permission denied',
+        suggestion: 'The build process cannot access a file or directory. Check file permissions.',
+      };
+    }
+
+    // Network errors
+    if (lower.includes('network') || lower.includes('enotfound') || lower.includes('timeout')) {
+      return {
+        summary: 'Network error',
+        suggestion: 'Check your internet connection or try again later.',
+      };
+    }
+
+    // Syntax errors
+    if (lower.includes('syntaxerror') || lower.includes('unexpected token')) {
+      return {
+        summary: 'Syntax error in code',
+        suggestion: 'There is a typo or formatting issue in the generated code.',
+      };
+    }
+
+    // Default
+    return {
+      summary: 'Build or verification failed',
+    };
+  }
+
+  /**
+   * Check for missing dependencies and prompt user
+   */
+  private async checkDependencies(architectureContent: string): Promise<'continue' | 'pause'> {
+    const required = detectRequiredRuntimes(architectureContent);
+    if (required.length === 0) return 'continue';
+
+    const missing = await checkMissingRuntimes(required);
+    if (missing.length === 0) {
+      console.log(chalk.green('✓ All required runtimes are installed\n'));
+      return 'continue';
+    }
+
+    const readline = await import('readline');
+    const choice = await promptForDependencies(missing, readline);
+
+    if (choice === 'manual') {
+      showInstallInstructions(missing);
+      return 'pause';
+    } else if (choice === 'skip') {
+      console.log(chalk.yellow('\n⚠️  Continuing without required dependencies. Build may fail.\n'));
+      return 'continue';
+    }
+
+    return 'continue';
+  }
+
+  /**
+   * Validate that Interview phase only created allowed files
+   * Returns violation details if unauthorized files were created
+   */
+  private async validateInterviewOutputs(): Promise<{ files: string[] } | null> {
+    const projectPath = this.state.getProjectPath();
+    const allowedFiles = [
+      '.skunkworks/SPEC.md',
+      '.skunkworks/state.json',
+    ];
+
+    // Code file extensions that should NOT be created during interview
+    const codeExtensions = [
+      '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+      '.swift', '.kt', '.java', '.py', '.rb', '.go', '.rs',
+      '.vue', '.svelte', '.html', '.css', '.scss', '.sass',
+      '.json', '.yaml', '.yml', '.toml',  // Config files (except in .skunkworks)
+    ];
+
+    // Project config files that indicate code was created
+    const projectConfigFiles = [
+      'package.json', 'tsconfig.json', 'vite.config.ts', 'next.config.js',
+      'Cargo.toml', 'go.mod', 'pyproject.toml', 'Gemfile',
+      'Podfile', 'build.gradle', 'pom.xml',
+    ];
+
+    const violations: string[] = [];
+
+    // Check for code files in project root (excluding .skunkworks and node_modules)
+    const scanDir = (dir: string, relativePath: string = ''): void => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.join(relativePath, entry.name);
+
+          // Skip allowed directories
+          if (entry.isDirectory()) {
+            if (entry.name === '.skunkworks' || entry.name === 'node_modules' || entry.name === '.git') {
+              continue;
+            }
+            // New directories created during interview are suspicious
+            scanDir(fullPath, relPath);
+          } else {
+            // Check if this is a code file
+            const ext = path.extname(entry.name).toLowerCase();
+            if (codeExtensions.includes(ext) && !relPath.startsWith('.skunkworks')) {
+              violations.push(relPath);
+            }
+            // Check for project config files
+            if (projectConfigFiles.includes(entry.name) && !relPath.startsWith('.skunkworks')) {
+              violations.push(relPath);
+            }
+          }
+        }
+      } catch {
+        // Ignore read errors
+      }
+    };
+
+    // Only scan if this is a fresh interview (no existing code)
+    // Check if there was already a package.json before interview
+    const hadExistingCode = fs.existsSync(path.join(projectPath, 'package.json')) ||
+                           fs.existsSync(path.join(projectPath, 'src'));
+
+    if (!hadExistingCode) {
+      scanDir(projectPath);
+    }
+
+    return violations.length > 0 ? { files: violations } : null;
+  }
+
+  /**
+   * Extract project types from SPEC.md
+   * Looks for "Project Type:" field or keywords in the content
+   */
+  private extractProjectTypes(specContent: string): import('./state.js').ProjectType[] {
+    const types: import('./state.js').ProjectType[] = [];
+    const content = specContent.toLowerCase();
+
+    // Try to find explicit project type field
+    const typeMatch = content.match(/project\s+type[:\s]+([^\n]+)/i);
+    if (typeMatch) {
+      const typeStr = typeMatch[1].toLowerCase();
+      if (typeStr.includes('web')) types.push('web');
+      if (typeStr.includes('ios') || typeStr.includes('iphone')) types.push('ios');
+      if (typeStr.includes('android')) types.push('android');
+      if (typeStr.includes('desktop')) types.push('desktop');
+      if (typeStr.includes('cli') || typeStr.includes('command')) types.push('cli');
+      if (typeStr.includes('backend') || typeStr.includes('api')) types.push('backend');
+      if (typeStr.includes('library') || typeStr.includes('package')) types.push('library');
+    }
+
+    // If no explicit field, try to infer from content
+    if (types.length === 0) {
+      if (content.includes('ios app') || content.includes('iphone') || content.includes('swift')) {
+        types.push('ios');
+      }
+      if (content.includes('android app')) {
+        types.push('android');
+      }
+      if (content.includes('mobile app') && types.length === 0) {
+        types.push('ios', 'android'); // Assume both if generic "mobile"
+      }
+      if (content.includes('website') || content.includes('web app') || content.includes('browser')) {
+        types.push('web');
+      }
+      if (content.includes('command line') || content.includes('cli tool') || content.includes('terminal')) {
+        types.push('cli');
+      }
+      if (content.includes('api') || content.includes('backend') || content.includes('server')) {
+        types.push('backend');
+      }
+      if (content.includes('desktop app') || content.includes('electron')) {
+        types.push('desktop');
+      }
+    }
+
+    // Default to web if nothing detected
+    if (types.length === 0) {
+      types.push('web');
+    }
+
+    return [...new Set(types)]; // Remove duplicates
+  }
+
+  /**
+   * Check if the current platform can build the detected project types
+   */
+  private checkPlatformCompatibility(projectTypes: import('./state.js').ProjectType[]): {
+    compatible: boolean;
+    message?: string;
+    suggestions?: string[];
+  } {
+    const platform = process.platform; // 'darwin' | 'win32' | 'linux'
+
+    // Platform requirements for each project type
+    const requirements: Record<import('./state.js').ProjectType, {
+      platforms: string[];
+      reason: string;
+      suggestions: string[];
+    }> = {
+      ios: {
+        platforms: ['darwin'],
+        reason: 'iOS apps require Xcode, which only runs on macOS.',
+        suggestions: [
+          'Use a Mac for iOS development',
+          'Consider using a cloud-based Mac service (MacStadium, MacinCloud)',
+          'Build a web app or PWA instead for cross-platform reach',
+        ],
+      },
+      android: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'Android development works on all platforms.',
+        suggestions: [],
+      },
+      web: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'Web development works on all platforms.',
+        suggestions: [],
+      },
+      desktop: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'Desktop app development works on all platforms (though cross-compilation may have limits).',
+        suggestions: [],
+      },
+      cli: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'CLI tools can be built on any platform.',
+        suggestions: [],
+      },
+      backend: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'Backend development works on all platforms.',
+        suggestions: [],
+      },
+      library: {
+        platforms: ['darwin', 'win32', 'linux'],
+        reason: 'Library development works on all platforms.',
+        suggestions: [],
+      },
+    };
+
+    // Check each project type
+    for (const type of projectTypes) {
+      const req = requirements[type];
+      if (!req) continue;
+
+      if (!req.platforms.includes(platform)) {
+        const platformName = platform === 'darwin' ? 'macOS' :
+                            platform === 'win32' ? 'Windows' : 'Linux';
+
+        return {
+          compatible: false,
+          message: `${type.toUpperCase()} projects cannot be built on ${platformName}. ${req.reason}`,
+          suggestions: req.suggestions,
+        };
+      }
+    }
+
+    return { compatible: true };
+  }
+
+  /**
+   * Extract project name from SPEC.md
+   * Looks for "# [Name] - Product Specification" or similar patterns
+   */
+  private extractProjectName(specContent: string): string | null {
+    // Try to extract from title line: "# Project Name - Product Specification"
+    const titleMatch = specContent.match(/^#\s+(.+?)\s*[-–—]\s*(?:Product\s+)?Specification/im);
+    if (titleMatch) {
+      return titleMatch[1].trim();
+    }
+
+    // Try simpler title: "# Project Name"
+    const simpleMatch = specContent.match(/^#\s+(.+?)(?:\n|$)/m);
+    if (simpleMatch) {
+      const name = simpleMatch[1].trim();
+      // Filter out generic titles
+      if (!name.toLowerCase().includes('specification') && !name.toLowerCase().includes('spec')) {
+        return name;
+      }
+    }
+
+    // Try to find "Project Name:" or "Name:" in the content
+    const nameMatch = specContent.match(/(?:Project\s+)?Name:\s*(.+?)(?:\n|$)/i);
+    if (nameMatch) {
+      return nameMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  /**
    * Get current status
    */
   getStatus(): void {
@@ -1086,6 +1763,74 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
         console.log(`  Board: ${state.github.projectUrl}`);
       }
     }
+  }
+
+  /**
+   * Check CLI health/auth status before starting work
+   * Returns true if OK to proceed, false if user wants to stop
+   */
+  private async checkCLIHealth(): Promise<boolean> {
+    console.log(chalk.gray('Checking CLI health...'));
+
+    const results = await this.router.checkAuthStatus();
+    const issues = results.filter(r => r.status !== 'ok');
+
+    if (issues.length === 0) {
+      console.log(chalk.green('✓ All CLI tools healthy\n'));
+      return true;
+    }
+
+    // Show issues
+    console.log(chalk.yellow('\n⚠️  CLI Health Issues Detected:\n'));
+
+    for (const issue of issues) {
+      const icon = issue.status === 'needs_auth' ? '🔐' : '❌';
+      console.log(chalk.white(`  ${icon} ${issue.cli}: ${issue.status}`));
+      if (issue.message) {
+        console.log(chalk.gray(`     ${issue.message.slice(0, 100)}...`));
+      }
+    }
+
+    // If any need auth, warn but let user choose
+    const needsAuth = issues.filter(r => r.status === 'needs_auth');
+    if (needsAuth.length > 0) {
+      console.log(chalk.yellow('\nSome CLI tools may need re-authentication.'));
+      console.log(chalk.gray('The pipeline might fail if these tools require login mid-session.\n'));
+
+      console.log(chalk.white('Options:'));
+      console.log(chalk.white('  [1] Continue anyway (might work)'));
+      console.log(chalk.white('  [2] Stop and fix auth issues first\n'));
+
+      const readline = await import('readline');
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(chalk.green('Your choice [1]: '), (input) => {
+          rl.close();
+          resolve(input.trim() || '1');
+        });
+      });
+
+      if (answer === '2') {
+        console.log(chalk.gray('\nTo fix auth issues:'));
+        for (const issue of needsAuth) {
+          if (issue.cli === 'claude-code') {
+            console.log(chalk.white(`  claude: Run 'claude /login' to re-authenticate`));
+          } else if (issue.cli === 'codex') {
+            console.log(chalk.white(`  codex: Run 'codex auth login' to re-authenticate`));
+          } else if (issue.cli === 'gemini') {
+            console.log(chalk.white(`  gemini: Run 'gemini auth login' to re-authenticate`));
+          }
+        }
+        console.log(chalk.gray('\nThen run skunkcontinue to resume.\n'));
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -1155,11 +1900,17 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
    * Gets critiques from multiple models to catch blind spots
    */
   private async runCouncilReview(content: string): Promise<CouncilResult | null> {
-    console.log(chalk.blue.bold('\n🏛️  Running Council Review...'));
-    console.log(chalk.gray('Getting critiques from Codex and Gemini to catch blind spots.\n'));
+    console.log(chalk.cyan.bold('\n  🏛️  COUNCIL REVIEW\n'));
+    console.log(chalk.gray('  Codex and Gemini are reviewing the architecture in parallel...'));
+    console.log(chalk.gray('  They look for: design flaws, missing pieces, risky decisions.\n'));
 
     try {
-      const result = await council.review(content, this.state.getProjectPath());
+      let result = await council.review(content, this.state.getProjectPath());
+
+      // Synthesize feedback if we got multiple reviews (Architect resolves conflicts)
+      if (result.reviews.length >= 2) {
+        result = await council.synthesizeCouncilFeedback(result, this.state.getProjectPath());
+      }
 
       if (result.reviews.length > 0) {
         council.displayResults(result);
@@ -1176,15 +1927,15 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
         });
 
         const proceed = await new Promise<boolean>((resolve) => {
-          rl.question(chalk.yellow('\nProceed to building? (Y to continue, N to revise plan): '), (answer) => {
+          rl.question(chalk.green('\n  Continue to Builder phase? (Y/n): '), (answer) => {
             rl.close();
             resolve(answer.toLowerCase() !== 'n');
           });
         });
 
         if (!proceed) {
-          console.log(chalk.gray('\nRevise your architecture based on the feedback, then run:'));
-          console.log(chalk.white('  abr continue\n'));
+          console.log(chalk.gray('\n  Edit .skunkworks/ARCHITECTURE.md based on the feedback, then run:'));
+          console.log(chalk.white('    skunkcontinue\n'));
           return result;
         }
       }
@@ -1274,11 +2025,17 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
    * Returns true if user wants to proceed, false if they want to revise
    */
   private async runCouncilReviewSpec(specContent: string): Promise<boolean> {
-    console.log(chalk.blue.bold('\n🏛️  Running Council Review on SPEC.md...'));
-    console.log(chalk.gray('Getting critiques from Codex and Gemini on requirements.\n'));
+    console.log(chalk.cyan.bold('\n  🏛️  COUNCIL REVIEW\n'));
+    console.log(chalk.gray('  Codex and Gemini are reviewing your spec in parallel...'));
+    console.log(chalk.gray('  They look for: unclear requirements, gaps, conflicts, risks.\n'));
 
     try {
-      const result = await council.reviewSpec(specContent, this.state.getProjectPath());
+      let result = await council.reviewSpec(specContent, this.state.getProjectPath());
+
+      // Synthesize feedback if we got multiple reviews (Architect resolves conflicts)
+      if (result.reviews.length >= 2) {
+        result = await council.synthesizeCouncilFeedback(result, this.state.getProjectPath());
+      }
 
       if (result.reviews.length > 0) {
         council.displayResults(result);
@@ -1300,7 +2057,7 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
 
         const proceed = await new Promise<boolean>((resolve) => {
           rl.question(
-            chalk.yellow('\nProceed to Architect phase? (Y to continue, N to revise spec): '),
+            chalk.green('\n  Continue to Architect phase? (Y/n): '),
             (answer) => {
               rl.close();
               resolve(answer.toLowerCase() !== 'n');
@@ -1309,8 +2066,8 @@ Produce a detailed REVIEW.md document with a Design System Compliance section.
         });
 
         if (!proceed) {
-          console.log(chalk.gray('\nRevise SPEC.md based on the feedback, then run:'));
-          console.log(chalk.white('  abr continue\n'));
+          console.log(chalk.gray('\n  Edit .skunkworks/SPEC.md based on the feedback, then run:'));
+          console.log(chalk.white('    skunkcontinue\n'));
           return false;
         }
       }

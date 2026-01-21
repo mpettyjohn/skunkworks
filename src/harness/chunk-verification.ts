@@ -33,13 +33,16 @@ export interface ChunkVerificationResult {
   errorOutput: string;
 }
 
+type ProjectType = 'web' | 'ios' | 'android' | 'desktop' | 'cli' | 'backend' | 'library';
+
 /**
  * Run verification at the specified level
  */
 export async function runChunkVerification(
   projectPath: string,
   level: VerificationLevel,
-  spec?: string
+  spec?: string,
+  projectTypes?: ProjectType[]
 ): Promise<ChunkVerificationResult> {
   console.log(chalk.blue(`\n📋 Running ${level} verification...\n`));
 
@@ -53,7 +56,7 @@ export async function runChunkVerification(
   // Always run tests if available
   if (await hasTestScript(projectPath)) {
     console.log(chalk.gray('  Running tests...'));
-    testResult = await runTests(projectPath);
+    testResult = await runTests(projectPath, projectTypes);
 
     if (!testResult.passed) {
       passed = false;
